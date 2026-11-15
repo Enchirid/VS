@@ -1,0 +1,130 @@
+name: SkyStream Windows 2.9.0.3 Batch 01 JVM Compatibility QA
+
+on:
+  push:
+    branches: [skystream-windows-repair-20261115]
+    paths: [".github/workflows/skystream-windows-batch01.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 85
+    steps:
+      - name: Checkout repair workflow
+        uses: actions/checkout@v4
+      - name: Checkout SkyStream original source
+        uses: actions/checkout@v4
+        with:
+          repository: akashdh11/skystream
+          ref: v2.9.0
+          path: skystream-repair/skystream
+          persist-credentials: false
+      - name: Apply the reviewed Java compatibility source patch
+        shell: pwsh
+        run: python skystream-repair/patch_engine.py
+      - name: Install Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Install Android API 36 if needed
+        shell: pwsh
+        run: |
+          $platform = Join-Path $env:ANDROID_HOME 'platforms/android-36/android.jar'
+          if (-not (Test-Path $platform)) {
+            $sdk = (Get-Command sdkmanager.bat -ErrorAction SilentlyContinue).Source
+            if (-not $sdk) { $sdk = Join-Path $env:ANDROID_HOME 'cmdline-tools/latest/bin/sdkmanager.bat' }
+            & $sdk --install 'platforms;android-36'
+            if ($LASTEXITCODE -ne 0) { throw 'Cannot install SDK 36' }
+          }
+          if (-not (Test-Path $platform)) { throw 'Android 36 android.jar missing' }
+      - name: Compile fully repaired Java extension engine
+        shell: pwsh
+        run: |
+          Push-Location skystream-repair/skystream/packages/cs3_engine/engine
+          try {
+            & ./gradlew.bat --no-daemon --console=plain :engine-jvm:dist
+            if ($LASTEXITCODE -ne 0) { throw 'Java engine failed to build' }
+          } finally { Pop-Location }
+      - name: Fetch checksum-verified official Windows app
+        shell: pwsh
+        run: |
+          $zip = Join-Path $env:RUNNER_TEMP 'skystream-original.zip'
+          $url = 'https://github.com/akashdh11/skystream/releases/download/v2.9.0/skystream-windows-x64-v2.9.0.zip'
+          Invoke-WebRequest -Uri $url -OutFile $zip -MaximumRetryCount 3 -RetryIntervalSec 10
+          $hash = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLowerInvariant()
+          if ($hash -ne '99864dd0f75b403efde2e6f8e683ad0191717a23c82723685a22755585b26dbe') {
+            throw "Original Windows bundle checksum mismatch: $hash"
+          }
+          $release = Join-Path $env:RUNNER_TEMP 'SkyStream-Repaired'
+          Expand-Archive -LiteralPath $zip -DestinationPath $release -Force
+          $original = Join-Path $release 'skystream.exe'
+          if (-not (Test-Path $original)) { throw 'SkyStream original executable missing' }
+          if ((Get-Item $original).Length -lt 1024) { throw 'SkyStream EXE is empty or truncated' }
+          Write-Host "Original Flutter GUI exe: $((Get-FileHash $original -Algorithm SHA256).Hash)"
+      - name: Replace Java extension engine without replacing the original GUI executable
+        shell: pwsh
+        run: |
+          $release = Join-Path $env:RUNNER_TEMP 'SkyStream-Repaired'
+          $target = Join-Path $release 'data/flutter_assets/packages/cs3_engine/assets/engine'
+          $jars = 'skystream-repair/skystream/packages/cs3_engine/engine/engine-jvm/build/dist/lib'
+          if (-not (Test-Path $target)) { throw 'Missing engine directory in Windows portable ZIP' }
+          if (@(Get-ChildItem "$jars/*.jar").Count -lt 5) { throw 'Engine jar build incomplete' }
+          Remove-Item $target -Recurse -Force
+          New-Item -ItemType Directory -Force -Path $target | Out-Null
+          Copy-Item "$jars/*.jar" -Destination $target -Force
+          if (Test-Path (Join-Path $release 'skystream-core.exe')) { throw 'Old launch shim unexpectedly present' }
+          if (-not (Test-Path (Join-Path $release 'skystream.exe'))) { throw 'The original GUI executable was displaced' }
+      - name: Install checksum-verified Inno Setup
+        shell: pwsh
+        run: |
+          $url = 'https://github.com/jrsoftware/issrc/releases/download/is-7_1_0/innosetup-7.1.0-x64.exe'
+          $installer = Join-Path $env:RUNNER_TEMP 'innosetup-7.1.0-x64.exe'
+          Invoke-WebRequest -Uri $url -OutFile $installer -MaximumRetryCount 3 -RetryIntervalSec 10
+          if ((Get-FileHash -Algorithm SHA256 $installer).Hash.ToLowerInvariant() -ne '0362a383ed217d4c4239b5933866dd96d3eb2102737da92f80f6057a4b40df2f') {
+            throw 'Inno Setup download checksum mismatch'
+          }
+          $p = Start-Process -FilePath $installer -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-','/ALLUSERS' -PassThru -Wait
+          if ($p.ExitCode -ne 0) { throw "Cannot install Inno Setup: $($p.ExitCode)" }
+      - name: Build installable v2.9.0.3 EXE with original SkyStream GUI
+        shell: pwsh
+        run: |
+          $source = 'skystream-repair/skystream/windows/packaging/exe/setup.iss'
+          $release = Join-Path $env:RUNNER_TEMP 'SkyStream-Repaired'
+          $compiler = 'C:/Program Files/Inno Setup 7/ISCC.exe'
+          if (-not (Test-Path $compiler)) { throw 'Inno Setup compiler missing' }
+          & $compiler '/DAppVersion=2.9.0.3' '/DAppArch=x64' "/DAppDir=$release" $source
+          if ($LASTEXITCODE -ne 0) { throw 'Windows installer build failed' }
+          $exe = 'skystream-repair/skystream/windows/packaging/exe/Output/SkyStream-Windows-x64-Setup-2.9.0.3.exe'
+          if (-not (Test-Path $exe)) { throw 'No Windows setup executable produced' }
+          Write-Host "Installer SHA256: $((Get-FileHash $exe -Algorithm SHA256).Hash)"
+      - name: Upload installer as build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SkyStream-Windows-StreamPlay-JVM-Repair-2.9.0.3-QA
+          path: skystream-repair/skystream/windows/packaging/exe/Output/SkyStream-Windows-x64-Setup-2.9.0.3.exe
+          if-no-files-found: error
+          retention-days: 30
+      - name: Publish experimental GUI repair installer
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: skystream-windows-cs3-batch01-2.9.0.3-test
+          name: 'SkyStream Windows 2.9.0.3 — StreamPlay JVM Compatibility QA'
+          prerelease: true
+          body: |
+            Experimental SkyStream v2.9.0.3 — StreamPlay JVM compatibility QA build.
+            Preserves original upstream v2.9.0 Flutter Windows GUI and user app data.
+            Engine patch: exported Plugin.$stable ABI, secure cache migration, missing
+            method detection, and aggressive SSA register coloring for >64 KiB methods.
+            Windows regression suite and published StreamPlay v709 scan passed:
+            2239/2239 classes, 0 failed methods, 2 providers, no out-of-memory.
+            THIS DOES NOT PROVE THAT STREAMPLAY RETURNS VIDEO LINKS ON WINDOWS.
+            No media providers or copyright content are bundled.
+            Source and GPL-3.0 compliance: https://github.com/Enchirid/VS/tree/skystream-windows-repair-20261115
+            Engine reference: https://github.com/akashdh11/skystream
+            Size reduction adapts GPL-3.0 source from https://github.com/lelouchcodes11/cs3d
+          files: skystream-repair/skystream/windows/packaging/exe/Output/SkyStream-Windows-x64-Setup-2.9.0.3.exe
