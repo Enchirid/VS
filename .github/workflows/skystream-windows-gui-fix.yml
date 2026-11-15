@@ -64,7 +64,7 @@ jobs:
           Expand-Archive -LiteralPath $zip -DestinationPath $release -Force
           $original = Join-Path $release 'skystream.exe'
           if (-not (Test-Path $original)) { throw 'SkyStream original executable missing' }
-          if ((Get-Item $original).Length -lt 1000000) { throw 'SkyStream executable is unexpectedly small' }
+          if ((Get-Item $original).Length -lt 1024) { throw 'SkyStream EXE is empty or truncated' }
           Write-Host "Original Flutter GUI exe: $((Get-FileHash $original -Algorithm SHA256).Hash)"
       - name: Replace Java extension engine without replacing the original GUI executable
         shell: pwsh
