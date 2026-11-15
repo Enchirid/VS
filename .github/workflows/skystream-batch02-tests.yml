@@ -1,4 +1,4 @@
-name: SkyStream Batch 02 — Log Hook Verification and Version Comparison
+name: SkyStream Batch 02 — Exception Capture and Version Comparison
 
 on:
   push:
