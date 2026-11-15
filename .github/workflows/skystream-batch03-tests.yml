@@ -68,10 +68,13 @@ jobs:
           if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
             choco install ffmpeg --no-progress -y
             if ($LASTEXITCODE -ne 0) { throw "ffmpeg install failed" }
-            refreshenv
           }
-          ffmpeg -version | Select-Object -First 1
-          ffprobe -version | Select-Object -First 1
+          $env:PATH = "$env:ChocolateyInstall\bin;$env:PATH"
+          & ffmpeg -version | Select-Object -First 1
+          & ffprobe -version | Select-Object -First 1
+          if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) { throw 'ffmpeg is not on PATH' }
+          if (-not (Get-Command ffprobe -ErrorAction SilentlyContinue)) { throw 'ffprobe is not on PATH' }
+          exit 0
       - name: Verify self-hosted HLS audio, video, subtitles, required headers
         shell: pwsh
         run: |
