@@ -90,8 +90,13 @@ object ExtractionDiagnostics {
     fun androidLog(priority: Int, raw: String) {
         val session = current.get() ?: return
         if (priority < 5 && !raw.startsWith("D/ApiError:") && !raw.startsWith("E/ApiError:")) return
-        val type = exceptionPattern.find(raw)?.groupValues?.getOrNull(1)
-        session.event(if (type in allowedExceptions) type!! else "ExtractorWarning")
+        // "D/ApiError:" is a log TAG, not the cause. Search the message after it,
+        // and choose the first recognized exception even if another word ends in Error.
+        val message = raw.substringAfter(':', raw)
+        val type = exceptionPattern.findAll(message)
+            .mapNotNull { it.groupValues.getOrNull(1) }
+            .firstOrNull { it in allowedExceptions }
+        session.event(type ?: "ExtractorWarning")
     }
 
     /**
