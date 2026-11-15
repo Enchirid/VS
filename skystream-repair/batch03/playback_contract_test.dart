@@ -51,7 +51,7 @@ Future<String> _get(String url) async {
 }
 
 void main() {
-  TestWidgetsFlutterBinding.ensureInitialized();
+  // Plain test() uses real loopback HttpClient. Widget-test binding forces HTTP 400.
   tearDown(() async => LocalProxyService.instance.shutdown());
 
   test('link headers, referer, adaptive quality, subtitle language survive mapping', () async {
