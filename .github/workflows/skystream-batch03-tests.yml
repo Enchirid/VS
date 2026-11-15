@@ -1,0 +1,87 @@
+name: SkyStream Batch 03 — Playback Handoff and Media Transport
+
+on:
+  push:
+    branches: [skystream-windows-repair-20261115]
+    paths: [".github/workflows/skystream-batch03-tests.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  flutter-handoff:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - name: Checkout repair repository
+        uses: actions/checkout@v4
+      - name: Checkout pinned SkyStream
+        uses: actions/checkout@v4
+        with:
+          repository: akashdh11/skystream
+          ref: v2.9.0
+          path: skystream-repair/skystream
+          persist-credentials: false
+      - name: Apply staged Flutter engine adapter and verification tests
+        run: |
+          python3 skystream-repair/batch02/apply_flutter.py
+          python3 skystream-repair/batch03/apply_tests.py
+      - name: Install Flutter 3.47.7
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.7'
+          channel: stable
+          cache: true
+      - name: Generate Flutter dependencies
+        working-directory: skystream-repair/skystream
+        run: |
+          flutter pub get
+          flutter gen-l10n
+          dart run build_runner build --delete-conflicting-outputs
+      - name: Test CloudStream -> StreamResult handoff, player buffering and recovery
+        working-directory: skystream-repair/skystream
+        run: |
+          flutter test test/core/cloudstream/cloudstream_provider_test.dart
+          flutter test test/features/player/media_options_test.dart
+          flutter test test/features/player/playback_recovery_test.dart
+          flutter test test/features/player/side_car_replay_test.dart
+          flutter test test/features/player/seek_is_not_a_stall_test.dart
+      - name: Archive test transcript
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: skystream-batch03-flutter-handoff-results
+          path: |
+            skystream-repair/skystream/test/core/cloudstream/cloudstream_provider_test.dart
+            skystream-repair/skystream/lib/core/cloudstream/cloudstream_provider.dart
+          retention-days: 14
+
+  windows-media-transport:
+    runs-on: windows-2022
+    timeout-minutes: 16
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ffmpeg if not already installed
+        shell: pwsh
+        run: |
+          if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
+            choco install ffmpeg --no-progress -y
+            if ($LASTEXITCODE -ne 0) { throw "ffmpeg install failed" }
+            refreshenv
+          }
+          ffmpeg -version | Select-Object -First 1
+          ffprobe -version | Select-Object -First 1
+      - name: Verify self-hosted HLS audio, video, subtitles, required headers
+        shell: pwsh
+        run: |
+          python skystream-repair/batch03/local_playback_fixture.py | Tee-Object -FilePath batch03-local-transport.jsonl
+          if ($LASTEXITCODE -ne 0) { throw 'Authorized transport verification failed' }
+      - name: Upload media test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: skystream-batch03-windows-media-transport
+          path: batch03-local-transport.jsonl
+          if-no-files-found: warn
+          retention-days: 14
