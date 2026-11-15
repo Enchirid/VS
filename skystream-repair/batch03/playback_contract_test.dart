@@ -44,7 +44,7 @@ Future<String> _get(String url) async {
     final request = await client.getUrl(Uri.parse(url));
     final response = await request.close();
     expect(response.statusCode, HttpStatus.ok);
-    return response.transform(utf8.decoder).join();
+    return await response.transform(utf8.decoder).join();
   } finally {
     client.close(force: true);
   }
