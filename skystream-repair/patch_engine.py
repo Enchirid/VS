@@ -27,7 +27,7 @@ patch(
     [
         (
             "internal const val CACHE_VERSION = 5",
-            "internal const val CACHE_VERSION = 6",
+            "internal const val CACHE_VERSION = 7",
         ),
         (
             "private val converting = Semaphore(2)",
@@ -36,12 +36,55 @@ patch(
         ),
         (
             '            carryOver(File(cacheRoot, "v${CACHE_VERSION - 1}/$hash"), root, dir)?.let { return it }',
-            """            // Repair v6: rebuild from original DEX, not the v5 cache. A v5 cache
-            // can contain partially converted methods from a smaller JVM heap.
-            // Intentionally skip carryOver until the v6 migration is verified.""",
+            """            // Repair v7: rebuild original DEX, not the v6 cache, so we
+            // can identify and quarantine missing JVM method bodies.
+            // Never carry over incomplete older jars.""",
         ),
     ],
 )
+
+
+patch(
+    "packages/cs3_engine/engine/engine-jvm/src/main/kotlin/dev/akash/cs3engine/jvm/Dex2Jar.kt",
+    [
+        (
+            "                val visitors = classWriters(frames, parents, handler, interfaces) { name, bytes -> output[i] = name to localClasses.fix(name, bytes) }",
+            """                val visitors = classWriters(frames, parents, handler, interfaces) { name, bytes ->
+                    val fixed = MissingMethodCode.repair(localClasses.fix(name, bytes))
+                    if (fixed.missing.isNotEmpty()) {
+                        failedMethods.addAndGet(fixed.missing.size)
+                        System.err.println("[CS3-CODE] ${fixed.missing.size} missing method bodies in $name; first=${fixed.missing.first()}")
+                    }
+                    output[i] = name to fixed.bytes
+                }""",
+        ),
+    ],
+)
+
+patch(
+    "packages/cs3_engine/engine/app-shims/src/main/kotlin/com/lagradost/cloudstream3/plugins/Plugin.kt",
+    [
+        (
+            "abstract class Plugin : BasePlugin() {",
+            """abstract class Plugin : BasePlugin() {
+    // Compiled extensions compiled with Compose expect this exact JVM static field.
+    companion object {
+        const val `$stable`: Int = 0
+    }""",
+        ),
+    ],
+)
+
+# Install the same testable bytecode repair class in the actual JVM module.
+import shutil
+patch_root = Path(__file__).resolve().parent
+jvm_root = ROOT / "packages/cs3_engine/engine/engine-jvm/src"
+destination = jvm_root / "main/kotlin/dev/akash/cs3engine/jvm/MissingMethodCode.kt"
+shutil.copyfile(patch_root / "src/MissingMethodCode.kt", destination)
+test_dest = jvm_root / "test/kotlin/dev/akash/cs3engine/jvm/MissingMethodCodeTest.kt"
+test_dest.parent.mkdir(parents=True, exist_ok=True)
+shutil.copyfile(patch_root / "src/MissingMethodCodeTest.kt", test_dest)
+print("INSTALLED bytecode sanitizer + JVM regression tests")
 
 patch(
     "packages/cs3_engine/engine/engine-jvm/src/main/kotlin/dev/akash/cs3engine/jvm/JvmPluginLoader.kt",
@@ -80,4 +123,4 @@ patch(
     ],
 )
 
-print("SOURCE PATCH COMPLETE: Windows engine diagnostics + cache reset + lower conversion concurrency.")
+print("SOURCE PATCH COMPLETE: v7 converter + ABI shim + bytecode repair + regression tests")
