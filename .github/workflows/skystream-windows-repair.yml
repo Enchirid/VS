@@ -5,7 +5,6 @@ on:
     branches:
       - skystream-windows-repair-20261115
     paths:
-      - "skystream-repair/**"
       - ".github/workflows/skystream-windows-repair.yml"
   workflow_dispatch:
 
