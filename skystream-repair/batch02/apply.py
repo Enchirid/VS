@@ -136,12 +136,13 @@ import dev.akash.cs3engine.host.ExtractionDiagnostics""",
             )""",
             """            val status = if (providerSuccess == true) "true" else if (providerSuccess == false) "false" else "unknown"
             val safe = diagnostics.summary()
-            if (!finished) throw TimeoutException(
+            // Preserve CloudStream's original protocol: zero links is a completed response,
+            // not a thrown JVM exception. Extension games, waiting windows and callers that
+            // inspect completed/fullScreen rely on that behavior.
+            answer["error"] = if (!finished)
                 "${api.name} produced no links before the ${timeoutMs / 1000}s extension deadline; diagnostics: $safe"
-            )
-            throw IllegalStateException(
-                "${api.name} completed extraction with no playable links; extension returned $status; diagnostics: $safe"
-            )""",
+            else
+                "${api.name} completed extraction with no playable links; extension returned $status; diagnostics: $safe" """,
         ),
     ],
 )
@@ -172,6 +173,18 @@ import dev.akash.cs3engine.host.ExtractionDiagnostics""",
     }
     System.setErr(diagnosticErr)
     System.setOut(System.err)""",
+        ),
+    ],
+)
+
+# Upstream KeptWindowsTest assumes a Unix-rooted File is absolute on Windows.
+# The production keeper keys plugins by absolutePath; test that invariant on both OSes.
+patch(
+    f"{shims}/engine-core/src/test/kotlin/dev/akash/cs3engine/ui/KeptWindowsTest.kt",
+    [
+        (
+            """        assertEquals(plugin, kept.gone { it == "a" })""",
+            """        assertEquals(plugin.absoluteFile, kept.gone { it == "a" })""",
         ),
     ],
 )
