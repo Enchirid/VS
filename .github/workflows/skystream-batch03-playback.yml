@@ -1,4 +1,4 @@
-name: SkyStream Batch 03 — Windows Playback and Native VLC Verification
+name: SkyStream Batch 03 — Windows Proxy and Native Playback Rerun
 
 on:
   push:
