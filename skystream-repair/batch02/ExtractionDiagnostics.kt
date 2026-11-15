@@ -16,6 +16,8 @@ import java.util.function.BiConsumer
 object ExtractionDiagnostics {
     private val current = ThreadLocal<Session?>()
     private val exceptionPattern = Regex("""\b([A-Za-z][A-Za-z0-9]*(?:Exception|Error))\b""")
+    // Only compiled Kotlin method identifiers; no domain names, query strings or request data.
+    private val extractorFrame = Regex("""\bat\s+com\.phisher98\.StreamPlayExtractor\.([A-Za-z][A-Za-z0-9_]{0,48})\(""")
     private val allowedExceptions = setOf(
         "UnknownHostException", "SocketTimeoutException", "ConnectException",
         "SSLHandshakeException", "SSLPeerUnverifiedException", "IOException",
@@ -29,6 +31,7 @@ object ExtractionDiagnostics {
         private val lock = Any()
         private val categories = mutableMapOf<String, Int>()
         private val statuses = mutableMapOf<String, Int>()
+        private val methods = mutableMapOf<String, Int>()
         private val started = System.nanoTime()
 
         private fun count(where: MutableMap<String, Int>, category: String) {
@@ -41,11 +44,13 @@ object ExtractionDiagnostics {
 
         internal fun event(category: String) = count(categories, category)
         internal fun http(category: String) = count(statuses, category)
+        internal fun sourceMethod(method: String) = count(methods, method)
 
         fun snapshot(): Map<String, Any> = synchronized(lock) {
             mapOf(
                 "httpStatuses" to statuses.toSortedMap(),
                 "exceptions" to categories.toSortedMap(),
+                "sourceFrames" to methods.toSortedMap(),
                 "elapsedMs" to ((System.nanoTime() - started) / 1_000_000).coerceAtLeast(0),
                 "coverage" to "shared HTTP client and inherited coroutine logs only",
             )
@@ -56,6 +61,7 @@ object ExtractionDiagnostics {
             val parts = mutableListOf<String>()
             statuses.toSortedMap().forEach { (key, count) -> parts.add(key + "=" + count) }
             categories.toSortedMap().forEach { (key, count) -> parts.add(key + "=" + count) }
+            methods.toSortedMap().forEach { (key, count) -> parts.add("source." + key + "=" + count) }
             if (parts.isEmpty()) "no captured network/error events"
             else parts.take(12).joinToString(", ")
         }
@@ -97,6 +103,20 @@ object ExtractionDiagnostics {
             .mapNotNull { it.groupValues.getOrNull(1) }
             .firstOrNull { it in allowedExceptions }
         session.event(type ?: "ExtractorWarning")
+    }
+
+    /**
+     * JVM System.err stack traces produced by CloudStream logError().
+     * Retains ONLY recognized exception categories and bounded StreamPlay
+     * Kotlin method names. It never stores throwable messages, paths or URLs.
+     */
+    fun stderrLine(raw: String) {
+        val session = current.get() ?: return
+        extractorFrame.find(raw)?.groupValues?.getOrNull(1)?.let(session::sourceMethod)
+        val type = exceptionPattern.findAll(raw.take(512))
+            .mapNotNull { it.groupValues.getOrNull(1) }
+            .firstOrNull { it in allowedExceptions }
+        if (type != null) session.event(type)
     }
 
     /**
