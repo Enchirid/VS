@@ -77,6 +77,23 @@ class ExtractionDiagnosticsTest {
     }
 
     @Test
+    fun retainsOnlySafeExtractorMethodSymbolsFromStderr() = runBlocking {
+        val session = ExtractionDiagnostics.start()
+        withContext(ExtractionDiagnostics.context(session)) {
+            ExtractionDiagnostics.stderrLine("java.net.UnknownHostException: https://api.example/private?token=NEVER-STORE")
+            ExtractionDiagnostics.stderrLine("at com.phisher98.StreamPlayExtractor.invokeMovieBox(StreamPlayExtractor.kt:117)")
+            ExtractionDiagnostics.stderrLine("at com.phisher98.StreamPlayExtractor.invokeMovieBox(StreamPlayExtractor.kt:117)")
+            ExtractionDiagnostics.stderrLine("at java.net.HttpURLConnection.getInputStream0(URLInputStream.kt:7)")
+        }
+        val report = session.snapshot().toString()
+        assertTrue(report.contains("UnknownHostException=1"))
+        assertTrue(report.contains("invokeMovieBox=2"))
+        assertFalse(report.contains("NEVER-STORE"))
+        assertFalse(report.contains("api.example"))
+        assertFalse(report.contains("HttpURLConnection"))
+    }
+
+    @Test
     fun enforcesBoundsWithoutRetainingInput() = runBlocking {
         val session = ExtractionDiagnostics.start()
         withContext(ExtractionDiagnostics.context(session)) {
