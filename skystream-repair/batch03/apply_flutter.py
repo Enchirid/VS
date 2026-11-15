@@ -58,4 +58,6 @@ test_file = ROOT / "test/core/cloudstream/batch03_playback_contract_test.dart"
 test_file.write_text((Path(__file__).parent / "playback_contract_test.dart").read_text(encoding="utf-8"), encoding="utf-8")
 native_test = ROOT / "integration_test/cloudstream/fixture_playback_test.dart"
 native_test.write_text((Path(__file__).parent / "native_playback_test.dart").read_text(encoding="utf-8"), encoding="utf-8")
-print("BATCH03 FLUTTER PATCH APPLIED: subtitle cookies, mapping tests and Windows native integration test")
+codec_test = ROOT / "integration_test/cloudstream/fixture_native_formats_test.dart"
+codec_test.write_text((Path(__file__).parent / "native_format_smoke_test.dart").read_text(encoding="utf-8"), encoding="utf-8")
+print("BATCH03 FLUTTER PATCH APPLIED: subtitle cookies, mapping tests, native Windows VLC + audio/HLS fixtures")
