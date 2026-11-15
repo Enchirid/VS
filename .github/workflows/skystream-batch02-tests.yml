@@ -1,0 +1,113 @@
+name: SkyStream Batch 02 — Extraction Diagnostics and Version Comparison
+
+on:
+  push:
+    branches: [skystream-windows-repair-20261115]
+    paths: [".github/workflows/skystream-batch02-tests.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnostics:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - name: Checkout repair sources
+        uses: actions/checkout@v4
+      - name: Checkout pinned upstream SkyStream
+        uses: actions/checkout@v4
+        with:
+          repository: akashdh11/skystream
+          ref: v2.9.0
+          path: skystream-repair/skystream
+          persist-credentials: false
+      - name: Apply Batch 01 and Batch 02 patches
+        shell: pwsh
+        run: |
+          python skystream-repair/patch_engine.py
+          if ($LASTEXITCODE -ne 0) { throw 'Batch 01 patch failed' }
+          python skystream-repair/batch02/apply.py
+          if ($LASTEXITCODE -ne 0) { throw 'Batch 02 patch failed' }
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Ensure Android SDK API 36
+        shell: pwsh
+        run: |
+          $platform = Join-Path $env:ANDROID_HOME 'platforms/android-36/android.jar'
+          if (-not (Test-Path $platform)) {
+            $sdk = (Get-Command sdkmanager.bat -ErrorAction SilentlyContinue).Source
+            if (-not $sdk) { $sdk = Join-Path $env:ANDROID_HOME 'cmdline-tools/latest/bin/sdkmanager.bat' }
+            & $sdk --install 'platforms;android-36'
+            if ($LASTEXITCODE -ne 0) { throw 'SDK API 36 installation failed' }
+          }
+      - name: Run full JVM regression suite and compile Java engine
+        shell: pwsh
+        run: |
+          Push-Location skystream-repair/skystream/packages/cs3_engine/engine
+          try {
+            & ./gradlew.bat --no-daemon --console=plain ':app-shims:test' ':engine-core:test' ':engine-jvm:test' ':engine-jvm:dist'
+            if ($LASTEXITCODE -ne 0) { throw 'Batch 02 JVM test suite failed' }
+          } finally { Pop-Location }
+      - name: Upload unit test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: skystream-batch02-test-results
+          path: |
+            skystream-repair/skystream/packages/cs3_engine/engine/app-shims/build/test-results/test/
+            skystream-repair/skystream/packages/cs3_engine/engine/engine-core/build/test-results/test/
+            skystream-repair/skystream/packages/cs3_engine/engine/engine-jvm/build/test-results/test/
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Download and SHA256-verify Adam Knight v687 versus upstream v709
+        shell: pwsh
+        run: |
+          $root = Join-Path $env:RUNNER_TEMP 'batch02-extensions'
+          foreach ($version in @('v687','v709')) {
+            New-Item -ItemType Directory -Path (Join-Path $root $version) -Force | Out-Null
+          }
+          $samples = @(
+            @{ver='v687'; url='https://raw.githubusercontent.com/phisher98/cloudstream-extensions-phisher/3b67c552158a9dc0f898069974a3a9838743bd64/StreamPlay.cs3'; sha='fc779f9c8e07afba3cca8a9c63c58cd3c40b514cbb4369b6115ad466bf3eca00'},
+            @{ver='v709'; url='https://raw.githubusercontent.com/phisher98/cloudstream-extensions-phisher/refs/heads/builds/StreamPlay.cs3'; sha='b4ad26b1d2f18cd30450e4dd75242dd8bfcaf475e30dcca4924613abe9f5397e'}
+          )
+          foreach ($entry in $samples) {
+            $file = Join-Path (Join-Path $root $entry.ver) 'StreamPlay.cs3'
+            Invoke-WebRequest -Uri $entry.url -OutFile $file -MaximumRetryCount 3 -RetryIntervalSec 10
+            $digest = (Get-FileHash -Algorithm SHA256 -LiteralPath $file).Hash.ToLowerInvariant()
+            if ($digest -ne $entry.sha) { throw "$($entry.ver) SHA256 mismatch: $digest" }
+            Write-Host "$($entry.ver) verified sha256=$digest size=$((Get-Item $file).Length)"
+          }
+      - name: Compare JVM conversion and extension registrations for both pinned versions
+        shell: pwsh
+        timeout-minutes: 14
+        run: |
+          $lib = (Resolve-Path 'skystream-repair/skystream/packages/cs3_engine/engine/engine-jvm/build/dist/lib').Path
+          $classpath = Join-Path $lib '*'
+          $root = Join-Path $env:RUNNER_TEMP 'batch02-extensions'
+          foreach ($ver in @('v687','v709')) {
+            $plugins = Join-Path $root $ver
+            $data = Join-Path $env:RUNNER_TEMP "cs3-batch02-$ver"
+            New-Item -ItemType Directory -Force -Path $data | Out-Null
+            Write-Host "Starting isolated $ver scan"
+            & java '-Xmx6g' '-cp' $classpath 'dev.akash.cs3engine.jvm.MainKt' '--scan' $data $plugins 2>&1 | Tee-Object -FilePath "batch02-$ver.log"
+            if ($LASTEXITCODE -ne 0) { throw "JVM scan $ver exited $LASTEXITCODE" }
+            $result = Get-Content "batch02-$ver.log" | Where-Object { $_ -match '^\{"file":"StreamPlay.cs3"' } | Select-Object -Last 1
+            if (-not $result) { throw "$ver missing scan result" }
+            $decoded = $result | ConvertFrom-Json
+            Write-Host "$ver scan result: $result"
+            if (-not $decoded.ok) { throw "$ver failed plugin registration" }
+            if ($decoded.notes.incomplete) { throw "$ver still contains missing/invalid methods" }
+          }
+      - name: Upload structured comparison and sanitized Java logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: skystream-batch02-v687-v709-scan
+          path: batch02-*.log
+          if-no-files-found: warn
+          retention-days: 14
