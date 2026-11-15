@@ -49,6 +49,15 @@ jobs:
             & ./gradlew.bat --no-daemon --console=plain :engine-jvm:test :engine-jvm:dist
             if ($LASTEXITCODE -ne 0) { throw 'Engine compilation failed' }
           } finally { Pop-Location }
+      - name: Preserve full JVM regression test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: skystream-batch01-kotlin-tests
+          path: skystream-repair/skystream/packages/cs3_engine/engine/engine-jvm/build/test-results/test/
+          retention-days: 10
+          if-no-files-found: warn
+
       - name: Fetch official published StreamPlay extension
         shell: pwsh
         run: |
