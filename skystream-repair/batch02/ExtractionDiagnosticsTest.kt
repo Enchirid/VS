@@ -34,7 +34,7 @@ class ExtractionDiagnosticsTest {
     @Test
     fun capturesApiErrorLogsWithoutRawUrls() = runBlocking {
         val session = ExtractionDiagnostics.start()
-        ExtractionDiagnostics.installJvmLogHook()
+        assertTrue(ExtractionDiagnostics.installJvmLogHook(), "Log diagnostic observer must be present in desktop stub")
         withContext(Dispatchers.IO + ExtractionDiagnostics.context(session)) {
             android.util.Log.d("ApiError", "safeApiCall: java.net.SocketTimeoutException at https://example.org/watch?apikey=secret")
             android.util.Log.e("SomePlugin", "SSLHandshakeException for https://example.org/private?cookie=do-not-leak")
