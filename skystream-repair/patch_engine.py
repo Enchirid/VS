@@ -42,6 +42,22 @@ patch(
     "packages/cs3_engine/engine/engine-jvm/src/main/kotlin/dev/akash/cs3engine/jvm/Dex2Jar.kt",
     [
         (
+            """            override fun handleMethodTranslateException(method: Method, node: DexMethodNode, mv: MethodVisitor, e: Exception) {
+                failedMethods.incrementAndGet()
+            }""",
+            """            override fun handleMethodTranslateException(method: Method, node: DexMethodNode, mv: MethodVisitor, e: Exception) {
+                failedMethods.incrementAndGet()
+                // Only method signature and compiler failure, never URLs, responses, cookies, or headers.
+                System.err.println("[CS3-DEX] ${method.owner}->${method.name}${method.desc}: ${e.javaClass.simpleName}: ${e.message?.take(220)}")
+            }""",
+        ),
+    ],
+)
+
+patch(
+    "packages/cs3_engine/engine/engine-jvm/src/main/kotlin/dev/akash/cs3engine/jvm/Dex2Jar.kt",
+    [
+        (
             "                val visitors = classWriters(frames, parents, handler, interfaces) { name, bytes -> output[i] = name to localClasses.fix(name, bytes) }",
             """                val visitors = classWriters(frames, parents, handler, interfaces) { name, bytes ->
                     val fixed = MissingMethodCode.repair(localClasses.fix(name, bytes))
