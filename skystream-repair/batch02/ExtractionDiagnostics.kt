@@ -99,13 +99,19 @@ object ExtractionDiagnostics {
      * Android's real Log doesn't: reflection makes this an opt-in JVM-only hook,
      * preserving the unchanged SkyStream Android runtime.
      */
-    fun installJvmLogHook() {
-        runCatching {
+    fun installJvmLogHook(): Boolean {
+        val status = runCatching {
             val cls = Class.forName("android.util.Log")
             val setter = cls.getMethod("setDiagnosticObserver", BiConsumer::class.java)
             setter.invoke(null, BiConsumer<Int, String> { priority, text ->
                 androidLog(priority, text)
             })
         }
+        if (status.isFailure) {
+            // Never print class names, full exception messages or environment paths.
+            System.err.println("[CS3-DIAG] Android log observer unavailable: " +
+                status.exceptionOrNull()?.javaClass?.simpleName)
+        }
+        return status.isSuccess
     }
 }
