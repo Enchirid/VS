@@ -148,4 +148,6 @@ import dev.akash.cs3engine.host.ExtractionDiagnostics""",
 
 tests = ROOT / shims / "app-shims/src/test/kotlin/dev/akash/cs3engine/host/ExtractionDiagnosticsTest.kt"
 shutil.copyfile(HERE / "ExtractionDiagnosticsTest.kt", tests)
-print("BATCH02 SOURCE PATCH COMPLETE: privacy-safe extraction and network diagnostics, per-call categorization")
+engine_tests = ROOT / shims / "engine-core/src/test/kotlin/dev/akash/cs3engine/ExtractionPipelineTest.kt"
+shutil.copyfile(HERE / "ExtractionPipelineTest.kt", engine_tests)
+print("BATCH02 SOURCE PATCH COMPLETE: bounded extraction diagnostics plus synthetic callback regression")
