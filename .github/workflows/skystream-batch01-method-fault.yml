@@ -1,0 +1,99 @@
+name: SkyStream Batch 01 Remaining Method Fault Analysis
+
+on:
+  push:
+    branches: [skystream-windows-repair-20261115]
+    paths: [".github/workflows/skystream-batch01-method-fault.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - name: Checkout probe scripts
+        uses: actions/checkout@v4
+      - name: Checkout pinned SkyStream 2.9.0 code
+        uses: actions/checkout@v4
+        with:
+          repository: akashdh11/skystream
+          ref: v2.9.0
+          path: skystream-repair/skystream
+          persist-credentials: false
+      - name: Apply same patches as Windows GUI Repair 2.9.0.2
+        shell: pwsh
+        run: python skystream-repair/patch_engine.py
+      - name: Configure Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Ensure Android 36 framework available
+        shell: pwsh
+        run: |
+          $platform = Join-Path $env:ANDROID_HOME 'platforms/android-36/android.jar'
+          if (-not (Test-Path $platform)) {
+            $sdk = (Get-Command sdkmanager.bat -ErrorAction SilentlyContinue).Source
+            if (-not $sdk) { $sdk = Join-Path $env:ANDROID_HOME 'cmdline-tools/latest/bin/sdkmanager.bat' }
+            & $sdk --install 'platforms;android-36'
+            if ($LASTEXITCODE -ne 0) { throw 'SDK installation failed' }
+          }
+      - name: Build patched Java engine with detailed method errors
+        shell: pwsh
+        run: |
+          Push-Location skystream-repair/skystream/packages/cs3_engine/engine
+          try {
+            & ./gradlew.bat --no-daemon --console=plain :engine-jvm:dist
+            if ($LASTEXITCODE -ne 0) { throw 'Engine compilation failed' }
+          } finally { Pop-Location }
+      - name: Fetch official published StreamPlay extension
+        shell: pwsh
+        run: |
+          $folder = Join-Path $env:RUNNER_TEMP 'streamplay-cs3'
+          New-Item -ItemType Directory -Path $folder | Out-Null
+          $file = Join-Path $folder 'StreamPlay.cs3'
+          $uri = 'https://raw.githubusercontent.com/phisher98/cloudstream-extensions-phisher/refs/heads/builds/StreamPlay.cs3'
+          Invoke-WebRequest -Uri $uri -OutFile $file -MaximumRetryCount 3 -RetryIntervalSec 10
+          Write-Host "Extension filesize: $((Get-Item $file).Length) bytes"
+          Write-Host "Extension sha256: $((Get-FileHash $file -Algorithm SHA256).Hash)"
+          Add-Type -AssemblyName System.IO.Compression
+          $zip = [IO.Compression.ZipFile]::OpenRead($file)
+          try {
+            $entry = $zip.GetEntry('manifest.json')
+            if (-not $entry) { throw 'CS3 is missing manifest' }
+            $reader = [IO.StreamReader]::new($entry.Open())
+            try {
+              $manifest = $reader.ReadToEnd() | ConvertFrom-Json
+              Write-Host "Extension name: $($manifest.name); version: $($manifest.version)"
+            } finally { $reader.Dispose() }
+          } finally { $zip.Dispose() }
+      - name: Scan StreamPlay plugin load and DEX conversion with 6GB heap
+        shell: pwsh
+        timeout-minutes: 11
+        run: |
+          $libs = (Resolve-Path 'skystream-repair/skystream/packages/cs3_engine/engine/engine-jvm/build/dist/lib').Path
+          $classes = Join-Path $libs '*'
+          $folder = Join-Path $env:RUNNER_TEMP 'streamplay-cs3'
+          $data = Join-Path $env:RUNNER_TEMP 'cs3-repair-scan-data'
+          New-Item -ItemType Directory -Path $data | Out-Null
+          Write-Host "CS3 Scan starts; it may take several minutes for the large plugin"
+          & java '-Xmx6g' '-cp' $classes 'dev.akash.cs3engine.jvm.MainKt' '--scan' $data $folder 2>&1 | Tee-Object -FilePath 'streamplay-scan-output.txt'
+          if ($LASTEXITCODE -ne 0) { throw "CS3 scan failed with exit code $LASTEXITCODE" }
+          $json = Get-Content 'streamplay-scan-output.txt' | Where-Object { $_ -match '^\{"file":"StreamPlay.cs3"' } | Select-Object -Last 1
+          if (-not $json) { throw 'No CS3 scan result returned' }
+          $report = $json | ConvertFrom-Json
+          $report | ConvertTo-Json -Depth 8
+          if (-not $report.ok) { throw "StreamPlay v709 plugin cannot load: $($report.error) $($report.message)" }
+          if ($report.notes.incomplete) { throw "StreamPlay v709 plugin loaded with incomplete conversion: $($report.notes | ConvertTo-Json -Compress)" }
+          Write-Host "BATCH 01 PASS: StreamPlay registers providers without missing Java methods"
+      - name: Upload diagnostic transcript
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: skystream-batch01-translator-fault-report
+          path: streamplay-scan-output.txt
+          if-no-files-found: warn
+          retention-days: 10
