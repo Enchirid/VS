@@ -34,11 +34,11 @@ jobs:
           $before = 'abstract class Plugin : BasePlugin() {'
           if ($text.Split($before).Count -ne 2) { throw 'Unexpected Plugin shim layout' }
           $after = @'
-abstract class Plugin : BasePlugin() {
-    companion object {
-        const val `$stable`: Int = 0
-    }
-'@
+          abstract class Plugin : BasePlugin() {
+              companion object {
+                  const val `$stable`: Int = 0
+              }
+          '@
           $text = $text.Replace($before, $after)
           Set-Content -LiteralPath $path -Value $text -Encoding utf8
           Write-Host 'Added exact Plugin.$stable compatibility field, no other changes'
