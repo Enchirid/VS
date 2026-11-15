@@ -146,6 +146,36 @@ import dev.akash.cs3engine.host.ExtractionDiagnostics""",
     ],
 )
 
+# Capture the safe exception and source-method categories hidden by
+# CloudStream logError(Throwable.printStackTrace()); leave existing stderr
+# output behavior intact and only inspect stack-line text transiently.
+patch(
+    f"{shims}/engine-jvm/src/main/kotlin/dev/akash/cs3engine/jvm/Main.kt",
+    [
+        (
+            "import dev.akash.cs3engine.host.HostHooks",
+            """import dev.akash.cs3engine.host.HostHooks
+import dev.akash.cs3engine.host.ExtractionDiagnostics""",
+        ),
+        (
+            """    System.setErr(PrintStream(FileOutputStream(FileDescriptor.err), true, "UTF-8"))
+    System.setOut(System.err)""",
+            """    val diagnosticErr = object : PrintStream(FileOutputStream(FileDescriptor.err), true, "UTF-8") {
+        override fun println(x: Any?) {
+            if (x != null) ExtractionDiagnostics.stderrLine(x.toString())
+            super.println(x)
+        }
+        override fun println(x: String?) {
+            if (x != null) ExtractionDiagnostics.stderrLine(x)
+            super.println(x)
+        }
+    }
+    System.setErr(diagnosticErr)
+    System.setOut(System.err)""",
+        ),
+    ],
+)
+
 tests = ROOT / shims / "app-shims/src/test/kotlin/dev/akash/cs3engine/host/ExtractionDiagnosticsTest.kt"
 shutil.copyfile(HERE / "ExtractionDiagnosticsTest.kt", tests)
 engine_tests = ROOT / shims / "engine-core/src/test/kotlin/dev/akash/cs3engine/ExtractionPipelineTest.kt"
