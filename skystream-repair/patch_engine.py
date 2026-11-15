@@ -34,12 +34,6 @@ patch(
             # Limit peak heap pressure when large plugins are converting.
             "private val converting = Semaphore(1)",
         ),
-        (
-            '            carryOver(File(cacheRoot, "v${CACHE_VERSION - 1}/$hash"), root, dir)?.let { return it }',
-            """            // Repair v7: rebuild original DEX, not the v6 cache, so we
-            // can identify and quarantine missing JVM method bodies.
-            // Never carry over incomplete older jars.""",
-        ),
     ],
 )
 
@@ -57,6 +51,32 @@ patch(
                     }
                     output[i] = name to fixed.bytes
                 }""",
+        ),
+    ],
+)
+
+# Preserve valid legacy cache migration, but never reuse a malformed JVM class.
+# Existing ExitRewrite and ProbeRewrite regressions depend on the carry-over path.
+patch(
+    "packages/cs3_engine/engine/engine-jvm/src/main/kotlin/dev/akash/cs3engine/jvm/Dex2Jar.kt",
+    [
+        (
+            """        if (!jar.isFile || !meta.isFile) return null
+        val building = File(root, "${dir.name}.tmp${System.nanoTime()}")""",
+            """        if (!jar.isFile || !meta.isFile) return null
+        val earlier = Properties()
+        runCatching { meta.inputStream().use(earlier::load) }.getOrElse { return null }
+        if (earlier.getProperty("failedMethods")?.toIntOrNull() != 0 ||
+            earlier.getProperty("outOfMemoryAt") != null) return null
+        val building = File(root, "${dir.name}.tmp${System.nanoTime()}")""",
+        ),
+        (
+            "                        val bytes = zip.getInputStream(entry).use { it.readBytes() }",
+            """                        val bytes = zip.getInputStream(entry).use { it.readBytes() }
+                        if (entry.name.endsWith(".class") &&
+                            MissingMethodCode.repair(bytes).missing.isNotEmpty()) {
+                            throw IllegalStateException("Unsafe legacy DEX class with no Code: ${entry.name}")
+                        }""",
         ),
     ],
 )
