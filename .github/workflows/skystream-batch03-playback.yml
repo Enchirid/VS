@@ -1,0 +1,114 @@
+name: SkyStream Batch 03 — Windows Playback and Native VLC Verification
+
+on:
+  push:
+    branches: [skystream-windows-repair-20261115]
+    paths: [".github/workflows/skystream-batch03-playback.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FLUTTER_VERSION: '3.47.7'
+
+jobs:
+  playback:
+    runs-on: windows-2022
+    timeout-minutes: 70
+    steps:
+      - name: Checkout cumulative repair and verification sources
+        uses: actions/checkout@v4
+      - name: Checkout pinned upstream SkyStream v2.9.0
+        uses: actions/checkout@v4
+        with:
+          repository: akashdh11/skystream
+          ref: v2.9.0
+          path: skystream-repair/skystream
+          persist-credentials: false
+      - name: Apply B01 JVM and B02 extraction diagnostics plus Flutter adapter
+        shell: pwsh
+        run: |
+          python skystream-repair/patch_engine.py
+          if ($LASTEXITCODE -ne 0) { throw 'Batch01 patch failed' }
+          python skystream-repair/batch02/apply.py
+          if ($LASTEXITCODE -ne 0) { throw 'Batch02 patch failed' }
+          python skystream-repair/batch02/apply_flutter.py
+          if ($LASTEXITCODE -ne 0) { throw 'Batch02 Flutter adapter failed' }
+      - name: Apply B03 subtitle authentication and hermetic playback tests
+        shell: pwsh
+        run: |
+          python skystream-repair/batch03/apply_flutter.py
+          if ($LASTEXITCODE -ne 0) { throw 'Batch03 Flutter patch failed' }
+      - name: Configure Flutter 3.47.7
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - name: Configure Java 21 for the optional CS3 runtime
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Enable Windows desktop and install Flutter dependencies
+        shell: pwsh
+        run: |
+          flutter config --enable-windows-desktop
+          Push-Location skystream-repair/skystream
+          try {
+            flutter pub get
+            if ($LASTEXITCODE -ne 0) { throw 'flutter pub get failed' }
+            flutter gen-l10n
+            if ($LASTEXITCODE -ne 0) { throw 'localization generation failed' }
+            dart run build_runner build --delete-conflicting-outputs
+            if ($LASTEXITCODE -ne 0) { throw 'build_runner failed' }
+          } finally { Pop-Location }
+      - name: Run Flutter adapter, proxy, header, subtitle and playback regression tests
+        shell: pwsh
+        run: |
+          Push-Location skystream-repair/skystream
+          try {
+            $tests = @(
+              'test/core/cloudstream/batch03_playback_contract_test.dart',
+              'test/core/cloudstream/cloudstream_provider_test.dart',
+              'test/core/services/local_proxy_service_test.dart',
+              'test/core/services/external_player_headers_test.dart',
+              'test/features/player/media_options_test.dart',
+              'test/features/player/side_car_subtitles_test.dart',
+              'test/features/player/playback_recovery_test.dart'
+            )
+            foreach ($test in $tests) {
+              Write-Host "BATCH03: Flutter test $test"
+              flutter test --no-pub $test
+              if ($LASTEXITCODE -ne 0) { throw "Flutter regression failed: $test" }
+            }
+          } finally { Pop-Location }
+      - name: Verify original SkyStream Windows native VLC with licensed local fixture
+        shell: pwsh
+        timeout-minutes: 22
+        run: |
+          Push-Location skystream-repair/skystream
+          try {
+            $fixture = (Resolve-Path 'packages/vlc_player/example/assets/format_fixtures/keep_picture/film.mp4').Path
+            if (-not (Test-Path $fixture)) { throw 'Upstream VLC test fixture missing' }
+            Write-Host "Running hermetic Windows native VLC integration with pinned local fixture (no external media)"
+            flutter test --no-pub 'integration_test/cloudstream/fixture_playback_test.dart' -d windows "--dart-define=BATCH03_FILM_FILE=$fixture"
+            if ($LASTEXITCODE -ne 0) { throw 'Native Windows media decoding/proxy fixture failed' }
+          } finally { Pop-Location }
+      - name: Upload diagnostic unit-test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: skystream-batch03-flutter-results
+          path: |
+            skystream-repair/skystream/test-results/
+            skystream-repair/skystream/build/test_results/
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Summarize result
+        shell: pwsh
+        run: |
+          Write-Host 'BATCH03 Windows native VLC smoke and Flutter regression gates: PASS'
+          Write-Host 'No Windows installer has been built or published.'
+          Write-Host 'Actual StreamPlay external hosts are NOT part of this hermetic test.'
