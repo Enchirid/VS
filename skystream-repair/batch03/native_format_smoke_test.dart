@@ -47,8 +47,12 @@ void main() {
     var hasAudio = false;
     for (var i = 0; i < 80 && !controller.value.hasError && !hasAudio; i++) {
       await tester.pump(const Duration(milliseconds: 250));
-      final info = await controller.getMediaInfo();
-      hasAudio = info.audioTracks.isNotEmpty;
+      try {
+        final info = await controller.getMediaInfo();
+        hasAudio = info.audioTracks.isNotEmpty;
+      } catch (_) {
+        // Media metadata may not exist until the native demuxer opens.
+      }
     }
     expect(controller.value.hasError, isFalse);
     expect(hasAudio, isTrue, reason: 'native backend failed to identify the MP3 audio track');
@@ -66,8 +70,12 @@ void main() {
     var hasVideo = false;
     for (var i = 0; i < 100 && !controller.value.hasError && !hasVideo; i++) {
       await tester.pump(const Duration(milliseconds: 250));
-      final info = await controller.getMediaInfo();
-      hasVideo = info.videoTracks.isNotEmpty || controller.value.videoSize != null;
+      try {
+        final info = await controller.getMediaInfo();
+        hasVideo = info.videoTracks.isNotEmpty || controller.value.videoSize != null;
+      } catch (_) {
+        // The HLS manifest and first segment can still be loading.
+      }
     }
     expect(controller.value.hasError, isFalse);
     expect(hasVideo, isTrue, reason: 'native Windows HLS pipeline failed to identify a video track');
