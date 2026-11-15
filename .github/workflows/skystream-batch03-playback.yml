@@ -1,4 +1,4 @@
-name: SkyStream Batch 03 — Windows Proxy and Native Playback Rerun
+name: SkyStream Batch 03 — Full Windows MP4 HLS MP3 and Subtitle Verification
 
 on:
   push:
@@ -84,6 +84,14 @@ jobs:
               if ($LASTEXITCODE -ne 0) { throw "Flutter regression failed: $test" }
             }
           } finally { Pop-Location }
+      - name: Bundle the Java sidecar runtime required by full Windows builds
+        shell: pwsh
+        run: |
+          Push-Location skystream-repair/skystream
+          try {
+            dart run packages/cs3_engine/tool/build_runtime.dart --java-home "$env:JAVA_HOME"
+            if ($LASTEXITCODE -ne 0) { throw 'Bundled Java runtime build failed' }
+          } finally { Pop-Location }
       - name: Verify original SkyStream Windows native VLC with licensed local fixture
         shell: pwsh
         timeout-minutes: 22
@@ -95,6 +103,17 @@ jobs:
             Write-Host "Running hermetic Windows native VLC integration with pinned local fixture (no external media)"
             flutter test --no-pub 'integration_test/cloudstream/fixture_playback_test.dart' -d windows "--dart-define=BATCH03_FILM_FILE=$fixture"
             if ($LASTEXITCODE -ne 0) { throw 'Native Windows media decoding/proxy fixture failed' }
+          } finally { Pop-Location }
+      - name: Verify Windows native MP3 audio and HLS transport-stream playback
+        shell: pwsh
+        timeout-minutes: 19
+        run: |
+          Push-Location skystream-repair/skystream
+          try {
+            $audio = (Resolve-Path 'packages/vlc_player/example/assets/format_fixtures/audio.mp3').Path
+            $hls = (Resolve-Path 'packages/vlc_player/example/assets/format_fixtures/hls/playlist.m3u8').Path
+            flutter test --no-pub 'integration_test/cloudstream/fixture_native_formats_test.dart' -d windows "--dart-define=BATCH03_AUDIO_FILE=$audio" "--dart-define=BATCH03_HLS_FILE=$hls"
+            if ($LASTEXITCODE -ne 0) { throw 'Native Windows MP3/HLS codec tests failed' }
           } finally { Pop-Location }
       - name: Upload diagnostic unit-test results
         if: always()
