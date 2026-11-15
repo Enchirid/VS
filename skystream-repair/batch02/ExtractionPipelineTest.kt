@@ -12,7 +12,6 @@ import kotlinx.coroutines.runBlocking
 import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -73,11 +72,16 @@ class ExtractionPipelineTest {
 
     @Test
     fun emptyProviderResultExposesSafeFailureReason() = runBlocking {
-        val error = assertFailsWith<IllegalStateException> { engine(false).execute("loadLinks", request()) }
-        assertTrue(error.message.orEmpty().contains("extension returned false"))
-        assertTrue(error.message.orEmpty().contains("HTTP_403=1"))
-        assertTrue(error.message.orEmpty().contains("SocketTimeoutException=1"))
-        assertFalse(error.message.orEmpty().contains("SECRET"))
-        assertFalse(error.message.orEmpty().contains("example.invalid"))
+        @Suppress("UNCHECKED_CAST")
+        val result = engine(false).execute("loadLinks", request()) as Map<String, Any?>
+        assertEquals(true, result["completed"])
+        assertEquals(false, result["providerReportedSuccess"])
+        assertEquals(emptyList<Any>(), result["links"])
+        val error = result["error"] as String
+        assertTrue(error.contains("extension returned false"))
+        assertTrue(error.contains("HTTP_403=1"))
+        assertTrue(error.contains("SocketTimeoutException=1"))
+        assertFalse(error.contains("SECRET"))
+        assertFalse(error.contains("example.invalid"))
     }
 }
