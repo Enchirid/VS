@@ -56,4 +56,6 @@ patch(
 target.write_text(src, encoding="utf-8")
 test_file = ROOT / "test/core/cloudstream/batch03_playback_contract_test.dart"
 test_file.write_text((Path(__file__).parent / "playback_contract_test.dart").read_text(encoding="utf-8"), encoding="utf-8")
-print("BATCH03 FLUTTER PATCH APPLIED: subtitle proxy cookie fix and local playback contract tests")
+native_test = ROOT / "integration_test/cloudstream/fixture_playback_test.dart"
+native_test.write_text((Path(__file__).parent / "native_playback_test.dart").read_text(encoding="utf-8"), encoding="utf-8")
+print("BATCH03 FLUTTER PATCH APPLIED: subtitle cookies, mapping tests and Windows native integration test")
