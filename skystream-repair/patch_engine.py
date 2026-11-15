@@ -159,4 +159,7 @@ patch(
     ],
 )
 
-print("SOURCE PATCH COMPLETE: v7 converter + ABI shim + bytecode repair + regression tests")
+# Import only the GPL-compliant, method-size-specific optimizer from cs3d.
+import runpy
+runpy.run_path(str(patch_root / "shrink_large_methods.py"), run_name="__main__")
+print("SOURCE PATCH COMPLETE: v7 converter + ABI shim + oversized-method retry + regression tests")
