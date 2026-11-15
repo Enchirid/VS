@@ -1,4 +1,4 @@
-name: SkyStream Batch 01 Bytecode Repair Regression
+name: SkyStream Batch 01 Oversized Method Retry Verification
 
 on:
   push:
@@ -41,7 +41,7 @@ jobs:
             & $sdk --install 'platforms;android-36'
             if ($LASTEXITCODE -ne 0) { throw 'SDK installation failed' }
           }
-      - name: Run JVM regression suite and build patched Java engine
+      - name: Validate JVM bytecode, existing regressions, and oversized-method retry
         shell: pwsh
         run: |
           Push-Location skystream-repair/skystream/packages/cs3_engine/engine
