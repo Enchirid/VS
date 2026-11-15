@@ -1,4 +1,4 @@
-name: SkyStream Batch 02 — Exception Capture and Version Comparison
+name: SkyStream Batch 02 — Core Contract and Pinned Provider Validation
 
 on:
   push:
