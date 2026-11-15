@@ -27,7 +27,8 @@ class MissingMethodCodeTest {
         ctor.visitMaxs(1, 1)
         ctor.visitEnd()
 
-        val flags = Opcodes.ACC_PUBLIC or Opcodes.ACC_STATIC or
+        // JVM forbids an abstract static method; only the native fixture is static.
+        val flags = Opcodes.ACC_PUBLIC or (if (!abstractMethod) Opcodes.ACC_STATIC else 0) or
             (if (abstractMethod) Opcodes.ACC_ABSTRACT else 0) or
             (if (nativeMethod) Opcodes.ACC_NATIVE else 0)
         val method = cw.visitMethod(flags, "run", "()I", null, null)
